@@ -2,54 +2,51 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Http\Controllers\Controller;
 use App\Http\Resources\ProductResource;
-use App\Models\Product;
-use Exception;
+use App\Repositories\EloquentProductRepository;
+use App\Services\PaginationService;
+use App\Services\ProductValidationService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
 
 class ProductController extends ApiController
 {
-    public function index(Request $request)
+    protected $productRepository;
+    protected $validationService;
+    protected $paginationService;
+
+    public function __construct(EloquentProductRepository $productRepository, ProductValidationService $validationService, PaginationService $paginationService)
     {
-        return $this->paginateResponse(new Product(), ProductResource::class, $request, function ($query, $search) {
-            $query->where('name', 'like', '%' . $search . '%');
-        });
+        $this->productRepository = $productRepository;
+        $this->validationService = $validationService;
+        $this->paginationService = $paginationService;
     }
 
-    public function create(Request $request) {
-        try {
-            $validator = Validator::make($request->all(), [
-                'name' => 'required|string|min:3',
-                'quantity' => 'required|numeric'
-            ]);
+    public function index(Request $request)
+    {
+        $data = $this->productRepository->getAllProducts($request);
+        $resourceClass = ProductResource::class;
+        $pagination = $this->paginationService->generatePagination($data);
 
-            if($validator->fails()) {
-                $errors = $validator->errors()->all()[0];
-                return response()->json([
-                    'status' => false,
-                    'message' => $errors,
-                    'data' => []
-                ], 422);
-            }
+        $response = [
+            'data' => $resourceClass::collection($data),
+            'payload' => [
+                'pagination' => $pagination
+            ],
+        ];
 
-            $product = Product::create([
-                'name' => $request->name,
-                'quantity' => $request->quantity
-            ]);
+        return response()->json($response, 200);
+    }
 
-            return response()->json([
-                'status' => true,
-                'message' => 'Products successfully created',
-                'data' => $product->toArray()
-            ], 201);
-        } catch (Exception $e) {
-            return response()->json([
-                'status' => false,
-                'message' => $e->getMessage(),
-                'data' => []
-            ], 500);
+    public function create(Request $request)
+    {
+        $data = $request->all();
+
+        $validationResult = $this->validationService->validationCreateProduct($data);
+
+        if (!$validationResult['status']) {
+            return $this->jsonResponse($validationResult, 422);
         }
+
+        return $this->productRepository->createProduct($data);
     }
 }
